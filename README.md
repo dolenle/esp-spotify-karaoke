@@ -7,7 +7,7 @@ This project uses an ESP8266 to fetch and display time-synchronized lyrics for t
 - The code is messy. It is mostly proof of concept.
 - Spotify API functions are adapted from the [esp8266-spotify-remote](https://github.com/ThingPulse/esp8266-spotify-remote) project.
 - API keys and WiFi credentials go in the `include/secrets.h` file.
-- For testing I am using a 20x4 HD44780 character LCD via a PCF8574 I2C expander, though eventually I'd like to use a larger LED matrix display.
+- For testing I am using a 20x4 HD44780 character LCD, though eventually I'd like to use a larger LED matrix display.
 
 ## Known Issues
 - Use of dynamic Strings.

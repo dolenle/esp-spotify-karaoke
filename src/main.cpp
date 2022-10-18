@@ -1,3 +1,27 @@
+/*
+MIT License
+
+Copyright (c) 2022 Dolen Le
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <time.h>
@@ -7,16 +31,15 @@
 #include <ArduinoJson.h>
 #include <ESP8266HTTPClient.h>
 
-#include <Wire.h> 
-#include <LiquidCrystal_I2C.h>
-
 #include "secrets.h"
+#include "lcd2004.h"
 
 #define PLAYBACK_REFRSH_INTERVAL    5000
 #define PLAYBACK_REFRESH_MARGIN     3000
 #define PLAYBACK_RETRY_INTERVAL     250
 
-LiquidCrystal_I2C lcd(0x27,2,1,0,4,5,6,7,3,POSITIVE);
+LCD2004 lcd(D3, D4);
+
 ESP8266WebServer server(80);
 
 typedef struct {
@@ -203,18 +226,18 @@ bool updatePlayback() {
   if (error) {
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.f_str());
-    return 0;
+    return false;
   }
 
-  // long long timestamp = doc["timestamp"]; // 1665468979630
-  playback.progress = doc["progress_ms"]; // 915
+  // long long timestamp = doc["timestamp"];
+  playback.progress = doc["progress_ms"];
 
   JsonObject item = doc["item"];
-  playback.album_name = (const char*)item["album"]["name"]; // "Late Night Tales: Groove Armada"
+  playback.album_name = (const char*)item["album"]["name"];
   playback.artist_name = (const char*)item["artists"][0]["name"];
   playback.duration = item["duration_ms"];
-  playback.track_id = (const char*)item["id"]; // "6pj2yQlRvxYKLMxMTJaUUT"
-  playback.track_name = (const char*)item["name"]; // "Roscoe - Beyond the Wizard's Sleeve Remix"
+  playback.track_id = (const char*)item["id"];
+  playback.track_name = (const char*)item["name"];
   playback.playing = doc["is_playing"];
 
   playback.millis = millis();
@@ -351,7 +374,7 @@ void setup() {
     Serial.println(F("FATAL: filesystem error"));
     while(1);
   }
-  lcd.begin(20,4);
+  lcd.begin();
   lcd.clear();
   lcd.print("Connecting to");
   lcd.setCursor(0,1);
@@ -383,8 +406,6 @@ void setup() {
   if (auth.refreshToken != "") {
     saveRefreshToken(auth.refreshToken);
   }
-
-  next_lyric_ms = 1;
 }
 
 void loop() {
@@ -450,7 +471,7 @@ void loop() {
           }
           Serial.println(playback.progress);
         } else {
-          last_update = now - PLAYBACK_REFRSH_INTERVAL + PLAYBACK_RETRY_INTERVAL;  //retry
+          last_update = now + PLAYBACK_REFRSH_INTERVAL - PLAYBACK_RETRY_INTERVAL;  //retry
         }
       }
     }
