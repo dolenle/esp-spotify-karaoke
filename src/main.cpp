@@ -35,8 +35,9 @@ SOFTWARE.
 #include "lcd2004.h"
 
 #define PLAYBACK_REFRSH_INTERVAL    5000
-#define PLAYBACK_REFRESH_MARGIN     3000
+#define PLAYBACK_REFRESH_MARGIN     2000
 #define PLAYBACK_RETRY_INTERVAL     250
+#define REQUEST_TIMEOUT_MS          500
 
 LCD2004 lcd(D3, D4);
 
@@ -63,7 +64,7 @@ SpotifyPlayback playback;
 
 String lastTrack;
 
-StaticJsonDocument<8192> lyricDoc;
+StaticJsonDocument<12288> lyricDoc;
 const char* p_lyric = NULL;
 unsigned int next_lyric_ms;
 
@@ -114,7 +115,6 @@ String spotifyAuth() {
 void getToken(bool refresh, String code) {
   WiFiClientSecure client;
   client.setInsecure();
-  //https://accounts.spotify.com/api/token
   const char* host = "accounts.spotify.com";
   const int port = 443;
   String url = "/api/token";
@@ -139,15 +139,12 @@ void getToken(bool refresh, String code) {
                "Content-Type: application/x-www-form-urlencoded\r\n" + 
                "Connection: close\r\n\r\n" + 
                content;
-  // Serial.println(request);
   client.print(request);
   
-  int retryCounter = 0;
+  unsigned long req_start = millis();
   while(!client.available()) {
-    // executeCallback();
-    retryCounter++;
-    if (retryCounter > 20) {
-      Serial.println("RetryFail");
+    if(millis() - req_start > REQUEST_TIMEOUT_MS) {
+      Serial.println(F("Request Timeout"));
       return;
     }
     delay(10);
@@ -191,12 +188,11 @@ bool updatePlayback() {
                "Authorization: Bearer " + auth.accessToken + "\r\n" +
                "Connection: close\r\n\r\n";
   client.print(request);
-  
-  int retryCounter = 0;
+
+  unsigned long req_start = millis();
   while(!client.available()) {
-    retryCounter++;
-    if (retryCounter > 20) {
-      Serial.println("RetryFail");
+    if(millis() - req_start > REQUEST_TIMEOUT_MS) {
+      Serial.println(F("Request Timeout"));
       return false;
     }
     delay(10);
@@ -245,16 +241,41 @@ bool updatePlayback() {
   return true;
 }
 
+// From https://github.com/plageoj/urlencode
+String urlEncode(const char *msg)
+{
+    const char *hex = "0123456789ABCDEF";
+    String encodedMsg;
+    encodedMsg.reserve(strlen(msg) + 32);
+    encodedMsg = "";
+
+    while (*msg != '\0')
+    {
+        if (('a' <= *msg && *msg <= 'z') || ('A' <= *msg && *msg <= 'Z') || ('0' <= *msg && *msg <= '9') || *msg == '-' || *msg == '_' || *msg == '.' || *msg == '~')
+        {
+            encodedMsg += *msg;
+        }
+        else
+        {
+            encodedMsg += '%';
+            encodedMsg += hex[*msg >> 4];
+            encodedMsg += hex[*msg & 0xf];
+        }
+        msg++;
+    }
+    return encodedMsg;
+}
+
 void getLyrics() {
   static String mxmCookie;
   WiFiClientSecure client;
   HTTPClient http;
   p_lyric = NULL;
   client.setInsecure(); //Bad!
-  playback.track_name.replace(" ", "+");
-  playback.artist_name.replace(" ", "+");
-  String uri = "https://apic-desktop.musixmatch.com/ws/1.1/macro.subtitles.get?format=json&namespace=lyrics_synched&subtitle_format=lrc&app_id=web-desktop-app-v1.0&q_track="+ playback.track_name +
-    "&q_artist=" + playback.artist_name +
+  String track = urlEncode(playback.track_name.c_str());
+  String artist = urlEncode(playback.artist_name.c_str());
+  String uri = "https://apic-desktop.musixmatch.com/ws/1.1/macro.subtitles.get?format=json&namespace=lyrics_synched&subtitle_format=lrc&app_id=web-desktop-app-v1.0&q_track="+ track +
+    "&q_artist=" + artist +
     "&q_duration=" + playback.duration +
     "&usertoken=" + mm_token;
   Serial.println(uri);
@@ -448,7 +469,10 @@ void loop() {
   } else {
     if(now - last_update > PLAYBACK_REFRSH_INTERVAL || progress_ms > playback.duration) {
       if(!playback.playing || next_lyric_ms - progress_ms > PLAYBACK_REFRESH_MARGIN) {
+        unsigned long start = millis();
         if(updatePlayback()) {
+          Serial.print("UpdateTime: ");
+          Serial.println(millis() - start);
           last_update = now;
 
           // If current track changed, reload lyrics

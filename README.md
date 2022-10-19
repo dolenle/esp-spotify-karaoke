@@ -10,7 +10,7 @@ This project uses an ESP8266 to fetch and display time-synchronized lyrics for t
 - For testing I am using a 20x4 HD44780 character LCD, though eventually I'd like to use a larger LED matrix display.
 
 ## Known Issues
-- Use of dynamic Strings.
+- Use of dynamic Strings causing heap fragmentation.
 - Playback status updates interfere with lyric display timing
 - Large latency when fetching lyrics at the start of a new track.
 - Seeking backwards is not supported.
