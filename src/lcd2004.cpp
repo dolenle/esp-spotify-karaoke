@@ -84,22 +84,16 @@ void LCD2004::cmd(uint8_t val) {
     delayMicroseconds(DELAY_US_DATA_COMMAND);
 }
 
-inline void ccount_delay_us(uint32_t us) {
-    uint32_t ccount = esp_get_cycle_count();    
-}
-
 size_t IRAM_ATTR LCD2004::write(uint8_t val) {
     GPOC = 0xF000;
     GPOS = ((uint32_t)(val & 0xF0)) << 8;
     delayMicroseconds(DELAY_US_SETUP_HOLD);
     GPOC = (1 << en_pin);
-    delayMicroseconds(DELAY_US_SETUP_HOLD);
     GPOS = (1 << en_pin);
     GPOC = 0xF000;
     GPOS = ((uint32_t)(val & 0x0F)) << 12;
     delayMicroseconds(DELAY_US_SETUP_HOLD);
     GPOC = (1 << en_pin);
-    delayMicroseconds(DELAY_US_SETUP_HOLD);
     GPOS = (1 << en_pin);
     delayMicroseconds(DELAY_US_DATA_COMMAND);
     return 1;

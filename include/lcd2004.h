@@ -38,23 +38,12 @@ Note: The LCD data lines must be connected to the MCU as follows:
 #include <inttypes.h>
 #include <Print.h>
 
-// delayMicroseconds() runs faster depending on CPU clock.
-// If CPU is 160MHz, double all delay amounts.
-#if F_CPU == 80000000L
-    #define DELAY_US_SETUP_HOLD     1
-    #define DELAY_US_INIT           4100
-    #define DELAY_US_DATA_COMMAND   45
-    #define DELAY_US_LONG_COMMAND   1600
-#elif F_CPU == 160000000L
-    #define DELAY_US_SETUP_HOLD     2
-    #define DELAY_US_INIT           8200
-    #define DELAY_US_DATA_COMMAND   90
-    #define DELAY_US_LONG_COMMAND   3200
-#elif
-    #error Unsupported CPU speed. Must be 80MHz or 160MHz.
-#endif
-
-#define DELAY_MS_POR                100
+// Adjust according to LCD speed
+#define DELAY_US_SETUP_HOLD     1
+#define DELAY_US_INIT           5000
+#define DELAY_US_DATA_COMMAND   75
+#define DELAY_US_LONG_COMMAND   2600
+#define DELAY_MS_POR            100
 
 class LCD2004 : public Print
 {
