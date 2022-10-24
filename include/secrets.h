@@ -2,10 +2,15 @@
 
 // Put secret info here!
 
-#define WIFI_SSID "WIFI"
-#define WIFI_PASS "PASSWORD"
+// WiFi Credentials
+#define WIFI_SSID           "wifi-name"
+#define WIFI_PASS           "wifi-password"
 
-String clientId = "spotify_id";
-String clientSecret = "spotify_secret";
-String redirectUri = "http://esp8266.local/callback/";
-String mm_token = "mxm_token";
+// Spotify API
+#define MDNS_HOSTNAME       "esp8266"
+#define SP_CLIENT_ID        "spotify-client-id"
+#define SP_CLIENT_SECRET    "spotify-client-secret"
+#define SP_REDIRECT_URI     "http://" MDNS_HOSTNAME ".local/callback/"
+
+// Musicxmatch
+#define MM_TOKEN            "musicxmatch-token"

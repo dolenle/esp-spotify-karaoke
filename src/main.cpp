@@ -71,37 +71,30 @@ unsigned int next_lyric_ms;
 String spotifyAuth() {
   String oneWayCode = "";
 
-  server.on ( "/", []() {
-    Serial.println(clientId);
-    Serial.println(redirectUri);
-    server.sendHeader("Location", String("https://accounts.spotify.com/authorize/?client_id=" 
-      + clientId 
-      + "&response_type=code&redirect_uri=" 
-      + redirectUri 
-      + "&scope=user-read-private%20user-read-currently-playing%20user-read-playback-state"), true);
-    server.send ( 302, "text/plain", "");
-  } );
+  if(!MDNS.begin(MDNS_HOSTNAME)) {
+    Serial.println(F("FATAL: MDNS error"));
+    while(1) yield();
+  }
+  Serial.println(F("mDNS started"));
 
-  server.on ( "/callback/", [&oneWayCode](){
-    if(!server.hasArg("code")) {server.send(500, "text/plain", "BAD ARGS"); return;}
-    
-    oneWayCode = server.arg("code");
-    Serial.printf("Code: %s\n", oneWayCode.c_str());
-  
-    String message = "<html><head></head><body>Succesfully authentiated This device with Spotify. Restart your device now</body></html>";
-  
-    server.send ( 200, "text/html", message );
-  } );
+  server.on("/", []() {
+    server.sendHeader("Location", F("https://accounts.spotify.com/authorize/?client_id=" SP_CLIENT_ID \
+                      "&response_type=code&redirect_uri=" SP_REDIRECT_URI \
+                      "&scope=user-read-private%20user-read-currently-playing%20user-read-playback-state"), true);
+    server.send ( 302, "text/plain", "");
+  });
+
+  server.on ("/callback/", [&oneWayCode](){
+    if(!server.hasArg("code")) {
+      server.send(500, "text/plain", "BAD ARGS");
+    } else {
+      oneWayCode = server.arg("code");
+      server.send (200, "text/html", F("Spotify authorization complete. You can close this window."));
+    }
+  });
 
   server.begin();
-
-  if (WiFi.status() == WL_CONNECTED) {
-	  Serial.println("WiFi connected!");
-  } else {
-	  Serial.println("WiFi not connected!");
-  }
-
-  Serial.println ( "HTTP server started" );
+  Serial.println(F("HTTP server started"));
 
   while(oneWayCode == "") {
     server.handleClient();
@@ -109,6 +102,7 @@ String spotifyAuth() {
     yield();
   }
   server.stop();
+  MDNS.close();
   return oneWayCode;
 }
 
@@ -128,10 +122,9 @@ void getToken(bool refresh, String code) {
   if (refresh) {
     grantType = codeParam = "refresh_token"; 
   }
-  String authorizationRaw = clientId + ":" + clientSecret;
-  String authorization = base64::encode(authorizationRaw, false);
+  String authorization = base64::encode(F(SP_CLIENT_ID ":" SP_CLIENT_SECRET), false);
   // This will send the request to the server
-  String content = "grant_type=" + grantType + "&" + codeParam + "=" + code;
+  String content = "grant_type=" + grantType + "&" + codeParam + "=" + code + "&redirect_uri=" SP_REDIRECT_URI;
   String request = String("POST ") + url + " HTTP/1.1\r\n" +
                "Host: " + host + "\r\n" +
                "Authorization: Basic " + authorization + "\r\n" +
@@ -246,7 +239,7 @@ String urlEncode(const char *msg)
 {
     const char *hex = "0123456789ABCDEF";
     String encodedMsg;
-    encodedMsg.reserve(strlen(msg) + 32);
+    encodedMsg.reserve(strlen(msg) + 16);
     encodedMsg = "";
 
     while (*msg != '\0')
@@ -274,10 +267,10 @@ void getLyrics() {
   client.setInsecure(); //Bad!
   String track = urlEncode(playback.track_name.c_str());
   String artist = urlEncode(playback.artist_name.c_str());
-  String uri = "https://apic-desktop.musixmatch.com/ws/1.1/macro.subtitles.get?format=json&namespace=lyrics_synched&subtitle_format=lrc&app_id=web-desktop-app-v1.0&q_track="+ track +
+  String uri = "https://apic-desktop.musixmatch.com/ws/1.1/macro.subtitles.get?format=json&namespace=lyrics_synched&subtitle_format=lrc&app_id=web-desktop-app-v1.0&usertoken=" MM_TOKEN \
+    "&q_track="+ track +
     "&q_artist=" + artist +
-    "&q_duration=" + playback.duration +
-    "&usertoken=" + mm_token;
+    "&q_duration=" + playback.duration;
   Serial.println(uri);
   
   http.begin(client, uri);
@@ -324,27 +317,26 @@ void getLyrics() {
 }
 
 void saveRefreshToken(String refreshToken) {
-  File f = LittleFS.open("/sptoken.txt", "w+");
+  File f = LittleFS.open(F("/sptoken.txt"), "w+");
   if (!f) {
-    Serial.println("Failed to open sptoken");
+    Serial.println(F("Failed to write sptoken"));
     return;
   }
   f.println(refreshToken);
   f.close();
-  Serial.println("Saved sptoken");
+  Serial.println(F("Saved token"));
 }
 
 String loadRefreshToken() {
   File f = LittleFS.open(F("/sptoken.txt"), "r");
   if (!f) {
-    Serial.println("Failed to open sptoken");
+    Serial.println(F("Failed to read sptoken"));
     return "";
   }
   while(f.available()) {
       //Lets read line by line from the file
       String token = f.readStringUntil('\r');
-      Serial.print("Loaded Token: ");
-      Serial.println(token);
+      Serial.println(F("Loaded token"));
       f.close();
       return token;
   }
@@ -393,7 +385,7 @@ void setup() {
   Serial.begin(115200);
   if(!LittleFS.begin()) {
     Serial.println(F("FATAL: filesystem error"));
-    while(1);
+    while(1) yield();
   }
   lcd.begin();
   lcd.clear();
@@ -405,27 +397,34 @@ void setup() {
     delay(1000);
     Serial.print('.');
   }
-  Serial.println("Connected");
+  Serial.println(F("Connected"));
   Serial.println(WiFi.localIP());
   lcd.clear();
   lcd.print("Connected");
   lcd.setCursor(0,1);
   lcd.print(WiFi.localIP());
 
-  if (!MDNS.begin("esp8266")) {
-    Serial.println("Error setting up MDNS responder!");
-  }
-  Serial.println("mDNS responder started");
-
   String refreshToken = loadRefreshToken();
   if (refreshToken == "") {
+    lcd.setCursor(0,0);
+    lcd.print("Please visit");
+    lcd.setCursor(0,2);
+    lcd.print("in your web browser");
     String authCode = spotifyAuth();
     getToken(false, authCode);
+    lcd.clear();
+    lcd.print("Connected!");
   } else {
     getToken(true, refreshToken);
   }
   if (auth.refreshToken != "") {
     saveRefreshToken(auth.refreshToken);
+  } else if(auth.accessToken == "") {
+    Serial.println(F("Auth failed! Please check API credentials."));
+    lcd.clear();
+    lcd.print("Spotify auth failed!");
+    LittleFS.remove(F("/sptoken.txt"));
+    while(1) yield();
   }
 }
 
