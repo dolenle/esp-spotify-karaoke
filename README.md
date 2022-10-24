@@ -14,7 +14,6 @@ This project uses an ESP8266 to fetch and display time-synchronized lyrics for t
 - Playback status updates interfere with lyric display timing
 - Large latency when fetching lyrics at the start of a new track.
 - Seeking backwards is not supported.
-- Spotify auth needs renewal after some time.
 - Only English lyrics are supported (due to LCD font)
 - Missing or out-of-sync lyrics on some tracks
 - Rapid-fire lyrics prevent playback status from updating.

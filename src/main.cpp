@@ -77,6 +77,7 @@ String spotifyAuth() {
   }
   Serial.println(F("mDNS started"));
 
+  // Redirect user to Spotify authorization (login) page
   server.on("/", []() {
     server.sendHeader("Location", F("https://accounts.spotify.com/authorize/?client_id=" SP_CLIENT_ID \
                       "&response_type=code&redirect_uri=" SP_REDIRECT_URI \
@@ -84,6 +85,7 @@ String spotifyAuth() {
     server.send ( 302, "text/plain", "");
   });
 
+  // Retrieve auth code returned by Spotify
   server.on ("/callback/", [&oneWayCode](){
     if(!server.hasArg("code")) {
       server.send(500, "text/plain", "BAD ARGS");
@@ -164,7 +166,8 @@ void getToken(bool refresh, String code) {
   auth.refreshToken = (const char*)doc["refresh_token"];
 }
 
-bool updatePlayback() {
+int updatePlayback() {
+  int ret_code = 0;
   WiFiClientSecure client;
   client.setInsecure();
 
@@ -172,8 +175,8 @@ bool updatePlayback() {
   const int port = 443;
   String url = "/v1/me/player/currently-playing";
   if (!client.connect(host.c_str(), port)) {
-    Serial.println("connection failed");
-    return false;
+    Serial.println(F("Connection failed"));
+    return ret_code;
   }
 
   String request = "GET " + url + " HTTP/1.1\r\n" +
@@ -186,52 +189,57 @@ bool updatePlayback() {
   while(!client.available()) {
     if(millis() - req_start > REQUEST_TIMEOUT_MS) {
       Serial.println(F("Request Timeout"));
-      return false;
+      return ret_code;
     }
     delay(10);
   }
   
-  // Discard header
+  // Discard header, get HTTP code
   while (client.connected()) {
       String line = client.readStringUntil('\n');
-      if (line == "\r") {
+      if(line.startsWith(F("HTTP/1"))) {
+        ret_code = line.substring(9, line.indexOf(' ', 9)).toInt();
+      }
+      if(line == "\r") {
           break;
       }
   }
 
-  StaticJsonDocument<192> filter;
-  filter["timestamp"] = true;
-  filter["progress_ms"] = true;
-  filter["is_playing"] = true;
-  JsonObject filter_item = filter.createNestedObject("item");
-  filter_item["name"] = true;
-  filter_item["album"]["name"] = true;
-  filter_item["duration_ms"] = true;
-  filter_item["id"] = true;
-  filter_item["artists"][0]["name"] = true;
-  StaticJsonDocument<512> doc;
+  if(ret_code == 200) {
+    StaticJsonDocument<192> filter;
+    filter["timestamp"] = true;
+    filter["progress_ms"] = true;
+    filter["is_playing"] = true;
+    JsonObject filter_item = filter.createNestedObject("item");
+    filter_item["name"] = true;
+    filter_item["album"]["name"] = true;
+    filter_item["duration_ms"] = true;
+    filter_item["id"] = true;
+    filter_item["artists"][0]["name"] = true;
+    StaticJsonDocument<512> doc;
 
-  DeserializationError error = deserializeJson(doc, client, DeserializationOption::Filter(filter));
-  if (error) {
-    Serial.print(F("deserializeJson() failed: "));
-    Serial.println(error.f_str());
-    return false;
+    DeserializationError error = deserializeJson(doc, client, DeserializationOption::Filter(filter));
+    if (error) {
+      Serial.print(F("deserializeJson() failed: "));
+      Serial.println(error.f_str());
+      return false;
+    }
+
+    // long long timestamp = doc["timestamp"];
+    playback.progress = doc["progress_ms"];
+
+    JsonObject item = doc["item"];
+    playback.album_name = (const char*)item["album"]["name"];
+    playback.artist_name = (const char*)item["artists"][0]["name"];
+    playback.duration = item["duration_ms"];
+    playback.track_id = (const char*)item["id"];
+    playback.track_name = (const char*)item["name"];
+    playback.playing = doc["is_playing"];
+
+    playback.millis = millis();
   }
 
-  // long long timestamp = doc["timestamp"];
-  playback.progress = doc["progress_ms"];
-
-  JsonObject item = doc["item"];
-  playback.album_name = (const char*)item["album"]["name"];
-  playback.artist_name = (const char*)item["artists"][0]["name"];
-  playback.duration = item["duration_ms"];
-  playback.track_id = (const char*)item["id"];
-  playback.track_name = (const char*)item["name"];
-  playback.playing = doc["is_playing"];
-
-  playback.millis = millis();
-
-  return true;
+  return ret_code;
 }
 
 // From https://github.com/plageoj/urlencode
@@ -291,8 +299,8 @@ void getLyrics() {
     delay(100);
     http.addHeader("Cookie", mxmCookie);
     Serial.println(http.GET());
-  } else if(code == 404) {
-    Serial.println("404");
+  } else if(code != 200) {
+    return;
   }
 
   StaticJsonDocument<192> filter;
@@ -317,7 +325,7 @@ void getLyrics() {
 }
 
 void saveRefreshToken(String refreshToken) {
-  File f = LittleFS.open(F("/sptoken.txt"), "w+");
+  File f = LittleFS.open(F("/sptoken.txt"), "w");
   if (!f) {
     Serial.println(F("Failed to write sptoken"));
     return;
@@ -334,7 +342,6 @@ String loadRefreshToken() {
     return "";
   }
   while(f.available()) {
-      //Lets read line by line from the file
       String token = f.readStringUntil('\r');
       Serial.println(F("Loaded token"));
       f.close();
@@ -469,7 +476,8 @@ void loop() {
     if(now - last_update > PLAYBACK_REFRSH_INTERVAL || progress_ms > playback.duration) {
       if(!playback.playing || next_lyric_ms - progress_ms > PLAYBACK_REFRESH_MARGIN) {
         unsigned long start = millis();
-        if(updatePlayback()) {
+        int ret_code = updatePlayback();
+        if(ret_code == 200) {
           Serial.print("UpdateTime: ");
           Serial.println(millis() - start);
           last_update = now;
@@ -493,6 +501,13 @@ void loop() {
             }
           }
           Serial.println(playback.progress);
+        } else if(ret_code == 401) { // Unauthorized (access token expired)
+          String refreshToken = loadRefreshToken();
+          getToken(true, refreshToken);
+          if(auth.refreshToken != "") {
+            saveRefreshToken(auth.refreshToken);
+          }
+          last_update = now;
         } else {
           last_update = now + PLAYBACK_REFRSH_INTERVAL - PLAYBACK_RETRY_INTERVAL;  //retry
         }

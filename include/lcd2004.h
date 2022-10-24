@@ -42,7 +42,7 @@ Note: The LCD data lines must be connected to the MCU as follows:
 #define DELAY_US_SETUP_HOLD     1
 #define DELAY_US_INIT           5000
 #define DELAY_US_DATA_COMMAND   75
-#define DELAY_US_LONG_COMMAND   2600
+#define DELAY_US_LONG_COMMAND   2700
 #define DELAY_MS_POR            100
 
 class LCD2004 : public Print
