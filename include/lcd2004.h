@@ -29,6 +29,7 @@ Note: The LCD data lines must be connected to the MCU as follows:
     LCD DB5..........GPIO13 (NodeMCU D7)
     LCD DB4..........GPIO12 (NodeMCU D6)
     LCD RW...........GND
+    LCD EN...........GPIO16 (NodeMCU D0)
 */
 
 #ifndef LCD2004_H
@@ -48,7 +49,7 @@ Note: The LCD data lines must be connected to the MCU as follows:
 class LCD2004 : public Print
 {
     public:
-        LCD2004(uint8_t rs, uint8_t en);
+        LCD2004(uint8_t rs);
         void begin();
         void clear();
         void cmd(uint8_t val);
@@ -56,7 +57,6 @@ class LCD2004 : public Print
         size_t write(uint8_t val) override; // Print::write(uint8_t)
     private:
         uint8_t rs_pin;
-        uint8_t en_pin;
 };
 
 #endif

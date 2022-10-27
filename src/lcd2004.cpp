@@ -26,15 +26,14 @@ SOFTWARE.
 
 #include <inttypes.h>
 
-LCD2004::LCD2004(uint8_t rs, uint8_t en) {
+LCD2004::LCD2004(uint8_t rs) {
     rs_pin = rs;
-    en_pin = en;
 }
 
 void LCD2004::begin() {
     delay(DELAY_MS_POR);
     pinMode(rs_pin, OUTPUT);
-    pinMode(en_pin, OUTPUT);
+    pinMode(16, OUTPUT);
 
     pinMode(15, OUTPUT);
     pinMode(14, OUTPUT);
@@ -42,22 +41,23 @@ void LCD2004::begin() {
     pinMode(12, OUTPUT);
 
     // Initialization sequence
-    GPOC = 0xF000;
+    GP16O = 1;
+    GPOC = 0xF000 | (1 << rs_pin);
     GPOS = 0x3000;
     for(uint8_t i=0; i<3; i++) {
         delayMicroseconds(DELAY_US_SETUP_HOLD);
-        GPOC = (1 << en_pin);
+        GP16O = 0;
         delayMicroseconds(DELAY_US_SETUP_HOLD);
-        GPOS = (1 << en_pin);
+        GP16O = 1;
         delayMicroseconds(DELAY_US_INIT);
     }
     
     // Set 4-bit mode
     GPOC = 0x1000;
     delayMicroseconds(DELAY_US_SETUP_HOLD);
-    GPOC = (1 << en_pin);
+    GP16O = 0;
     delayMicroseconds(DELAY_US_SETUP_HOLD);
-    GPOS = (1 << en_pin);
+    GP16O = 1;
     delayMicroseconds(DELAY_US_DATA_COMMAND);
 
     // Function Set
@@ -88,13 +88,13 @@ size_t IRAM_ATTR LCD2004::write(uint8_t val) {
     GPOC = 0xF000;
     GPOS = ((uint32_t)(val & 0xF0)) << 8;
     delayMicroseconds(DELAY_US_SETUP_HOLD);
-    GPOC = (1 << en_pin);
-    GPOS = (1 << en_pin);
+    GP16O = 0;
+    GP16O = 1;
     GPOC = 0xF000;
     GPOS = ((uint32_t)(val & 0x0F)) << 12;
     delayMicroseconds(DELAY_US_SETUP_HOLD);
-    GPOC = (1 << en_pin);
-    GPOS = (1 << en_pin);
+    GP16O = 0;
+    GP16O = 1;
     delayMicroseconds(DELAY_US_DATA_COMMAND);
     return 1;
 }

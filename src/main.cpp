@@ -39,7 +39,7 @@ SOFTWARE.
 #define PLAYBACK_RETRY_INTERVAL     250
 #define REQUEST_TIMEOUT_MS          500
 
-LCD2004 lcd(D3, D4);
+LCD2004 lcd(D4);
 
 ESP8266WebServer server(80);
 
@@ -475,11 +475,8 @@ void loop() {
   } else {
     if(now - last_update > PLAYBACK_REFRSH_INTERVAL || progress_ms > playback.duration) {
       if(!playback.playing || next_lyric_ms - progress_ms > PLAYBACK_REFRESH_MARGIN) {
-        unsigned long start = millis();
         int ret_code = updatePlayback();
         if(ret_code == 200) {
-          Serial.print("UpdateTime: ");
-          Serial.println(millis() - start);
           last_update = now;
 
           // If current track changed, reload lyrics
@@ -500,7 +497,7 @@ void loop() {
               lcd.print("(No Synced Lyrics)");
             }
           }
-          Serial.println(playback.progress);
+          // Serial.println(playback.progress);
         } else if(ret_code == 401) { // Unauthorized (access token expired)
           String refreshToken = loadRefreshToken();
           getToken(true, refreshToken);
