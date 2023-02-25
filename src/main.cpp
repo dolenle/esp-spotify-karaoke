@@ -30,17 +30,18 @@ SOFTWARE.
 #include <ESP8266WebServer.h>
 #include <ArduinoJson.h>
 #include <ESP8266HTTPClient.h>
+#include <Ticker.h>
 
 #include "secrets.h"
 #include "lcd2004.h"
 
 #define PLAYBACK_REFRSH_INTERVAL    5000
-#define PLAYBACK_REFRESH_MARGIN     2000
 #define PLAYBACK_RETRY_INTERVAL     250
+#define PLAYBACK_PROGRESS_MARGIN    100
 #define REQUEST_TIMEOUT_MS          500
 
-LCD2004 lcd(D4);
-
+LCD2004 lcd(2);
+Ticker displayTicker;
 ESP8266WebServer server(80);
 
 typedef struct {
@@ -65,6 +66,7 @@ SpotifyPlayback playback;
 String lastTrack;
 
 StaticJsonDocument<12288> lyricDoc;
+const char* p_lyric_start;
 const char* p_lyric = NULL;
 unsigned int next_lyric_ms;
 
@@ -271,7 +273,7 @@ void getLyrics() {
   static String mxmCookie;
   WiFiClientSecure client;
   HTTPClient http;
-  p_lyric = NULL;
+  p_lyric = p_lyric_start = NULL;
   client.setInsecure(); //Bad!
   String track = urlEncode(playback.track_name.c_str());
   String artist = urlEncode(playback.artist_name.c_str());
@@ -317,8 +319,11 @@ void getLyrics() {
   }
 
   int lyric_available = lyricDoc["message"]["body"]["macro_calls"]["track.subtitles.get"]["message"]["header"]["available"];
+  Serial.println(lyric_available);
   if(lyric_available) {
-    p_lyric = lyricDoc["message"]["body"]["macro_calls"]["track.subtitles.get"]["message"]["body"]["subtitle_list"][0]["subtitle"]["subtitle_body"];
+    p_lyric_start = lyricDoc["message"]["body"]["macro_calls"]["track.subtitles.get"]["message"]["body"]["subtitle_list"][0]["subtitle"]["subtitle_body"];
+    p_lyric = p_lyric_start;
+    Serial.print(p_lyric);
   }
 
   http.end();
@@ -435,67 +440,106 @@ void setup() {
   }
 }
 
+void displayLyric() {
+  lcd.clear();
+  char c;
+  int cnt = 0;
+  int line = 0;
+  while((c = *p_lyric++) != '\n') {
+    // Serial.write(c);
+    int wcnt = 1;
+    if(c == ' ') {
+      // Find the length of the next word and wrap to next line if needed
+      const char* tmp = p_lyric;
+      while(*tmp && *tmp != ' ' && *tmp++ != '\n') {
+        wcnt++;
+      }
+      if(cnt == 0) {
+        continue;
+      } else if(cnt + wcnt > 20 && wcnt < 20) {
+        lcd.setCursor(0, ++line);
+        cnt = 0;
+        continue;
+      }
+    }
+    if(cnt < 20 && line < 4) {
+      lcd.write(c);
+    }
+    if(++cnt == 20) {
+      lcd.setCursor(0, ++line);
+      cnt = 0;
+    }
+  }
+  if(nextLyric()) {
+    unsigned int delta = next_lyric_ms - ((unsigned int)(millis() - playback.millis) + playback.progress);
+    displayTicker.once_ms(delta, displayLyric);
+  }
+}
+
 void loop() {
   static unsigned long last_update = 0;
   unsigned long now = millis();
   unsigned int progress_ms = (unsigned int)(now - playback.millis) + playback.progress;
 
-  if(playback.playing && p_lyric && progress_ms > next_lyric_ms) {
-      lcd.clear();
-      char c;
-      int cnt = 0;
-      int line = 0;
-      while((c = *p_lyric++) != '\n') {
-        Serial.write(c);
-        int wcnt = 1;
-        if(c == ' ') {
-          // Find the length of the next word and wrap to next line if needed
-          const char* tmp = p_lyric;
-          while(*tmp && *tmp != ' ' && *tmp++ != '\n') {
-            wcnt++;
-          }
-          if(cnt == 0) {
-            continue;
-          } else if(cnt + wcnt > 20 && wcnt < 20) {
-            lcd.setCursor(0, ++line);
-            cnt = 0;
-            continue;
-          }
-        }
-        if(cnt < 20 && line < 4) {
-          lcd.write(c);
-        }
-        if(++cnt == 20) {
-          lcd.setCursor(0, ++line);
-          cnt = 0;
-        }
-      }
-      Serial.write('\n');
-      nextLyric();
-  } else {
     if(now - last_update > PLAYBACK_REFRSH_INTERVAL || progress_ms > playback.duration) {
-      if(!playback.playing || next_lyric_ms - progress_ms > PLAYBACK_REFRESH_MARGIN) {
         int ret_code = updatePlayback();
         if(ret_code == 200) {
+          Serial.print("UpdateTime: ");
+          Serial.println(millis() - now);
           last_update = now;
 
           // If current track changed, reload lyrics
-          if(playback.playing && playback.track_id != lastTrack) {
-            Serial.println(playback.track_name);
-            Serial.println(playback.artist_name);
-            char line_buf[21];
-            lcd.clear();
-            snprintf(line_buf, sizeof(line_buf), playback.track_name.c_str());
-            lcd.print(line_buf);
-            snprintf(line_buf, sizeof(line_buf), playback.artist_name.c_str());
-            lcd.setCursor(0,1);
-            lcd.print(line_buf);
-            lastTrack = playback.track_id;
-            getLyrics();
-            if(!nextLyric()) {
-              lcd.setCursor(0,3);
-              lcd.print("(No Synced Lyrics)");
+          if(playback.playing) {
+            if(playback.track_id != lastTrack) {
+              displayTicker.detach();
+              Serial.println(playback.track_name);
+              Serial.println(playback.artist_name);
+              char line_buf[21];
+              lcd.clear();
+              snprintf(line_buf, sizeof(line_buf), playback.track_name.c_str());
+              lcd.print(line_buf);
+              snprintf(line_buf, sizeof(line_buf), playback.artist_name.c_str());
+              lcd.setCursor(0,1);
+              lcd.print(line_buf);
+              lastTrack = playback.track_id;
+              getLyrics();
+              if(!nextLyric()) {
+                lcd.setCursor(0,3);
+                lcd.print("(No Synced Lyrics)");
+              } else {
+                while(((millis() - playback.millis) + playback.progress) > next_lyric_ms) {
+                  Serial.println("skip");
+                  while(*p_lyric++ != '\n');
+                  if(!nextLyric() || !p_lyric) {
+                    break;
+                  }
+                }
+                if(p_lyric) {
+                  unsigned int delta = next_lyric_ms - ((unsigned int)(millis() - playback.millis) + playback.progress);
+                  displayTicker.once_ms(delta, displayLyric);
+                }
+              }
+            } else if(progress_ms > (playback.progress + PLAYBACK_PROGRESS_MARGIN)) {
+              Serial.println("resetLyric");
+              lcd.clear();
+              p_lyric = p_lyric_start;
+              if(nextLyric()) {
+                while(playback.progress > next_lyric_ms) {
+                  Serial.println("skip");
+                  while(*p_lyric++ != '\n');
+                  if(!nextLyric() || !p_lyric) {
+                    break;
+                  }
+                }
+                if(p_lyric) {
+                  unsigned int delta = next_lyric_ms - ((unsigned int)(millis() - playback.millis) + playback.progress);
+                  displayTicker.once_ms(delta, displayLyric);
+                }
+              }
             }
+          } else {
+            Serial.println("<PAUSED>");
+            displayTicker.detach();
           }
           // Serial.println(playback.progress);
         } else if(ret_code == 401) { // Unauthorized (access token expired)
@@ -505,10 +549,17 @@ void loop() {
             saveRefreshToken(auth.refreshToken);
           }
           last_update = now;
+        } else if(ret_code == 204) { // No Content (nothing playing)
+          Serial.println("<STOPPED>");
+          displayTicker.detach();
+          lcd.clear();
+          lcd.print("Playback Stopped.");
+          last_update = now;
+          playback.duration = UINT_MAX;
         } else {
+          Serial.println("Retry");
+          Serial.println(ret_code);
           last_update = now + PLAYBACK_REFRSH_INTERVAL - PLAYBACK_RETRY_INTERVAL;  //retry
         }
-      }
     }
-  }
 }
