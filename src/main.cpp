@@ -35,7 +35,7 @@ SOFTWARE.
 #include "secrets.h"
 #include "lcd2004.h"
 
-#define PLAYBACK_REFRSH_INTERVAL    5000
+#define PLAYBACK_REFRSH_INTERVAL    2000
 #define PLAYBACK_RETRY_INTERVAL     250
 #define PLAYBACK_PROGRESS_MARGIN    50
 #define REQUEST_TIMEOUT_MS          500
@@ -384,7 +384,6 @@ bool nextLyric() {
     return true;
   } else {
     Serial.println("Lyric err");
-    Serial.println(*p_lyric);
     p_lyric = NULL;
     next_lyric_ms = UINT_MAX;
     return false; //error
@@ -431,8 +430,8 @@ void displayLyric() {
   size_t len = printWrap(p_lyric, '\n');
   p_lyric+= (len+1);
   if(nextLyric()) {
-    unsigned int delta = next_lyric_ms - ((unsigned int)(millis() - playback.millis) + playback.progress);
-    displayTicker.once_ms(delta, displayLyric);
+    unsigned int lyric_delay = next_lyric_ms - ((unsigned int)(millis() - playback.millis) + playback.progress);
+    displayTicker.once_ms(lyric_delay, displayLyric);
   }
 }
 
@@ -509,65 +508,62 @@ void loop() {
   unsigned long now = millis();
   unsigned int progress_ms = (unsigned int)(now - playback.millis) + playback.progress;
 
-    if(now - last_update > PLAYBACK_REFRSH_INTERVAL || progress_ms > playback.duration) {
-        bool last_playing = playback.playing;
-        int ret_code = updatePlayback();
-        if(ret_code == 200) {
-          Serial.print("UpdateTime: ");
-          Serial.println(millis() - now);
-          last_update = now;
+  if(now - last_update > PLAYBACK_REFRSH_INTERVAL || progress_ms > playback.duration) {
+    bool last_playing = playback.playing;
+    int ret_code = updatePlayback();
+    last_update = millis();
+    if(ret_code == 200) {
+      Serial.print("UpdateTime: ");
+      Serial.println(last_update-now);
 
-          // If current track changed, reload lyrics
-          if(playback.playing) {
-            if(playback.track_id != lastTrack) {
-              displayTicker.detach();
-              Serial.println(playback.track_name);
-              Serial.println(playback.artist_name);
-              char line_buf[21];
-              lcd.clear();
-              snprintf(line_buf, sizeof(line_buf), playback.track_name.c_str());
-              lcd.print(line_buf);
-              snprintf(line_buf, sizeof(line_buf), playback.artist_name.c_str());
-              lcd.setCursor(0,1);
-              lcd.print(line_buf);
-              lastTrack = playback.track_id;
-              getLyrics();
-              if(!nextLyric()) {
-                lcd.setCursor(0,3);
-                lcd.print("(No Synced Lyrics)");
-              } else {
-                firstLyric();
-              }
-            } else if(!last_playing || progress_ms > (playback.progress + PLAYBACK_PROGRESS_MARGIN)) {
-              Serial.println("resetLyric");
-              lcd.clear();
-              p_lyric = p_lyric_start;
-              if(nextLyric()) {
-                firstLyric();
-              }
-            }
-          } else {
-            Serial.println("<PAUSED>");
-            displayTicker.detach();
-          }
-        } else if(ret_code == 401) { // Unauthorized (access token expired)
-          String refreshToken = loadRefreshToken();
-          getToken(true, refreshToken);
-          if(auth.refreshToken != "") {
-            saveRefreshToken(auth.refreshToken);
-          }
-          last_update = now;
-        } else if(ret_code == 204) { // No Content (nothing playing)
-          Serial.println("<STOPPED>");
+      // If current track changed, reload lyrics
+      if(playback.playing) {
+        if(playback.track_id != lastTrack) {
           displayTicker.detach();
+          Serial.println(playback.track_name);
+          Serial.println(playback.artist_name);
+          char line_buf[21];
           lcd.clear();
-          lcd.print("Playback Stopped.");
-          last_update = now;
-          playback.duration = UINT_MAX;
-        } else {
-          Serial.print("Retry ");
-          Serial.println(ret_code);
-          last_update = now + PLAYBACK_REFRSH_INTERVAL - PLAYBACK_RETRY_INTERVAL;  //retry
+          snprintf(line_buf, sizeof(line_buf), playback.track_name.c_str());
+          lcd.print(line_buf);
+          snprintf(line_buf, sizeof(line_buf), playback.artist_name.c_str());
+          lcd.setCursor(0,1);
+          lcd.print(line_buf);
+          lastTrack = playback.track_id;
+          getLyrics();
+          if(!nextLyric()) {
+            lcd.setCursor(0,3);
+            lcd.print("(No Synced Lyrics)");
+          } else {
+            firstLyric();
+          }
+        } else if(!last_playing || progress_ms > (playback.progress + PLAYBACK_PROGRESS_MARGIN)) {
+          Serial.println("resetLyric");
+          lcd.clear();
+          p_lyric = p_lyric_start;
+          if(nextLyric()) {
+            firstLyric();
+          }
         }
+      } else {
+        Serial.println("<PAUSED>");
+        displayTicker.detach();
+      }
+    } else if(ret_code == 401) { // Unauthorized (access token expired)
+      String refreshToken = loadRefreshToken();
+      getToken(true, refreshToken);
+      if(auth.refreshToken != "") {
+        saveRefreshToken(auth.refreshToken);
+      }
+    } else if(ret_code == 204) { // No Content (nothing playing)
+      Serial.println("<STOPPED>");
+      displayTicker.detach();
+      lcd.clear();
+      lcd.print("Playback Stopped.");
+    } else {
+      Serial.print("Retry ");
+      Serial.println(ret_code);
+      last_update += PLAYBACK_REFRSH_INTERVAL - PLAYBACK_RETRY_INTERVAL;  //retry
     }
+  }
 }
