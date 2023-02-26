@@ -37,7 +37,7 @@ SOFTWARE.
 
 #define PLAYBACK_REFRSH_INTERVAL    5000
 #define PLAYBACK_RETRY_INTERVAL     250
-#define PLAYBACK_PROGRESS_MARGIN    100
+#define PLAYBACK_PROGRESS_MARGIN    50
 #define REQUEST_TIMEOUT_MS          500
 
 LCD2004 lcd(2);
@@ -295,8 +295,7 @@ void getLyrics() {
   Serial.print("Response code: ");
   Serial.println(code);
   if(code == 301) {
-    Serial.println("cookies!");
-    // Save the cookies and send them back.
+    // Redirect: save the cookies and send them back.
     mxmCookie = http.header("Set-Cookie");
     delay(100);
     http.addHeader("Cookie", mxmCookie);
@@ -319,11 +318,9 @@ void getLyrics() {
   }
 
   int lyric_available = lyricDoc["message"]["body"]["macro_calls"]["track.subtitles.get"]["message"]["header"]["available"];
-  Serial.println(lyric_available);
   if(lyric_available) {
     p_lyric_start = lyricDoc["message"]["body"]["macro_calls"]["track.subtitles.get"]["message"]["body"]["subtitle_list"][0]["subtitle"]["subtitle_body"];
     p_lyric = p_lyric_start;
-    Serial.print(p_lyric);
   }
 
   http.end();
@@ -387,9 +384,76 @@ bool nextLyric() {
     return true;
   } else {
     Serial.println("Lyric err");
+    Serial.println(*p_lyric);
     p_lyric = NULL;
     next_lyric_ms = UINT_MAX;
     return false; //error
+  }
+}
+
+// Print the string to the LCD with word wrapping.
+// The diplayed string is truncated if it is too long.
+// Returns the length of the string.
+size_t printWrap(const char* str, const char end) {
+  lcd.clear();
+  char c;
+  size_t len = 0;
+  unsigned int col = 0;
+  unsigned int line = 0;
+  while((c = *str++) != end) {
+    len++;
+    unsigned int wcnt = 1;
+    if(c == ' ') {
+      const char* tmp = str;
+      while(*tmp && *tmp != ' ' && *tmp++ != end) {
+        wcnt++;
+      }
+      if(col == 0) {
+        continue;
+      } else if(col + wcnt > LCD_COLS && wcnt < LCD_COLS) {
+        lcd.setCursor(0, ++line);
+        col = 0;
+        continue;
+      }
+    }
+    if(col < LCD_COLS && line < LCD_LINES) {
+      lcd.write(c);
+    }
+    if(++col == LCD_COLS) {
+      lcd.setCursor(0, ++line);
+      col = 0;
+    }
+  }
+  return len;
+}
+
+void displayLyric() {
+  size_t len = printWrap(p_lyric, '\n');
+  p_lyric+= (len+1);
+  if(nextLyric()) {
+    unsigned int delta = next_lyric_ms - ((unsigned int)(millis() - playback.millis) + playback.progress);
+    displayTicker.once_ms(delta, displayLyric);
+  }
+}
+
+void firstLyric() {
+  unsigned int progress_delta = (millis() - playback.millis) + playback.progress;
+  const char* cur_lyric = NULL;
+  while(progress_delta > next_lyric_ms) {
+    cur_lyric = p_lyric;
+    while(*p_lyric++ != '\n'); // skip
+    if(!nextLyric() || !p_lyric) {
+      break;
+    }
+  }
+  // Display the current lyric
+  if(cur_lyric) {
+    printWrap(cur_lyric, '\n');
+  }
+  // Schedule the next lyric
+  if(p_lyric) {
+    unsigned int lyric_delay = next_lyric_ms - progress_delta;
+    displayTicker.once_ms(lyric_delay, displayLyric);
   }
 }
 
@@ -440,48 +504,13 @@ void setup() {
   }
 }
 
-void displayLyric() {
-  lcd.clear();
-  char c;
-  int cnt = 0;
-  int line = 0;
-  while((c = *p_lyric++) != '\n') {
-    // Serial.write(c);
-    int wcnt = 1;
-    if(c == ' ') {
-      // Find the length of the next word and wrap to next line if needed
-      const char* tmp = p_lyric;
-      while(*tmp && *tmp != ' ' && *tmp++ != '\n') {
-        wcnt++;
-      }
-      if(cnt == 0) {
-        continue;
-      } else if(cnt + wcnt > 20 && wcnt < 20) {
-        lcd.setCursor(0, ++line);
-        cnt = 0;
-        continue;
-      }
-    }
-    if(cnt < 20 && line < 4) {
-      lcd.write(c);
-    }
-    if(++cnt == 20) {
-      lcd.setCursor(0, ++line);
-      cnt = 0;
-    }
-  }
-  if(nextLyric()) {
-    unsigned int delta = next_lyric_ms - ((unsigned int)(millis() - playback.millis) + playback.progress);
-    displayTicker.once_ms(delta, displayLyric);
-  }
-}
-
 void loop() {
   static unsigned long last_update = 0;
   unsigned long now = millis();
   unsigned int progress_ms = (unsigned int)(now - playback.millis) + playback.progress;
 
     if(now - last_update > PLAYBACK_REFRSH_INTERVAL || progress_ms > playback.duration) {
+        bool last_playing = playback.playing;
         int ret_code = updatePlayback();
         if(ret_code == 200) {
           Serial.print("UpdateTime: ");
@@ -507,41 +536,20 @@ void loop() {
                 lcd.setCursor(0,3);
                 lcd.print("(No Synced Lyrics)");
               } else {
-                while(((millis() - playback.millis) + playback.progress) > next_lyric_ms) {
-                  Serial.println("skip");
-                  while(*p_lyric++ != '\n');
-                  if(!nextLyric() || !p_lyric) {
-                    break;
-                  }
-                }
-                if(p_lyric) {
-                  unsigned int delta = next_lyric_ms - ((unsigned int)(millis() - playback.millis) + playback.progress);
-                  displayTicker.once_ms(delta, displayLyric);
-                }
+                firstLyric();
               }
-            } else if(progress_ms > (playback.progress + PLAYBACK_PROGRESS_MARGIN)) {
+            } else if(!last_playing || progress_ms > (playback.progress + PLAYBACK_PROGRESS_MARGIN)) {
               Serial.println("resetLyric");
               lcd.clear();
               p_lyric = p_lyric_start;
               if(nextLyric()) {
-                while(playback.progress > next_lyric_ms) {
-                  Serial.println("skip");
-                  while(*p_lyric++ != '\n');
-                  if(!nextLyric() || !p_lyric) {
-                    break;
-                  }
-                }
-                if(p_lyric) {
-                  unsigned int delta = next_lyric_ms - ((unsigned int)(millis() - playback.millis) + playback.progress);
-                  displayTicker.once_ms(delta, displayLyric);
-                }
+                firstLyric();
               }
             }
           } else {
             Serial.println("<PAUSED>");
             displayTicker.detach();
           }
-          // Serial.println(playback.progress);
         } else if(ret_code == 401) { // Unauthorized (access token expired)
           String refreshToken = loadRefreshToken();
           getToken(true, refreshToken);
@@ -557,7 +565,7 @@ void loop() {
           last_update = now;
           playback.duration = UINT_MAX;
         } else {
-          Serial.println("Retry");
+          Serial.print("Retry ");
           Serial.println(ret_code);
           last_update = now + PLAYBACK_REFRSH_INTERVAL - PLAYBACK_RETRY_INTERVAL;  //retry
         }
