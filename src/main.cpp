@@ -50,7 +50,6 @@ typedef struct {
 SpotifyToken auth;
 
 typedef struct {
-    unsigned long timestamp;
     unsigned long millis;
     unsigned int progress;
     unsigned int duration;
@@ -209,7 +208,6 @@ int updatePlayback() {
 
     if(ret_code == 200) {
         StaticJsonDocument<192> filter;
-        filter["timestamp"] = true;
         filter["progress_ms"] = true;
         filter["is_playing"] = true;
         JsonObject filter_item = filter.createNestedObject("item");
@@ -227,7 +225,6 @@ int updatePlayback() {
             return false;
         }
 
-        // long long timestamp = doc["timestamp"];
         playback.progress = doc["progress_ms"];
 
         JsonObject item = doc["item"];
